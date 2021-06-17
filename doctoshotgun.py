@@ -6,6 +6,7 @@ import tempfile
 from time import sleep
 import json
 from urllib.parse import urlparse
+from random import randrange
 import datetime
 import argparse
 import getpass
@@ -37,6 +38,13 @@ try:
 except ImportError:
     def playsound(*args):
         pass
+
+
+def log_ts(text, *args, **kwargs):
+    ''' Log with time stamp'''
+    now = datetime.datetime.now()
+    print("[%s]" % now.isoformat(" ", "seconds"))
+    log(text, *args, **kwargs)
 
 
 def log(text, *args, **kwargs):
@@ -91,8 +99,9 @@ class CenterBookingPage(JsonPage):
     def find_motive(self, regex):
         for s in self.doc['data']['visit_motives']:
             if re.search(regex, s['name']) and s['allow_new_patients']:
+                log_ts("Found " + s['name'] + " " + str(s['id']) + " " + regex, color="green")
+                print(str(s))
                 return s['id']
-
         return None
 
     def get_motives(self):
@@ -123,6 +132,7 @@ class AvailabilitiesPage(JsonPage):
         for a in self.doc['availabilities']:
             date = parse_date(a['date']).date()
             if start_date and date < start_date or end_date and date > end_date:
+                log_ts("Slot out of range: " + str(date), color="red")
                 continue
             if len(a['slots']) == 0:
                 continue
@@ -450,10 +460,12 @@ class DoctolibDE(Doctolib):
     KEY_PFIZER = '6768'
     KEY_MODERNA = '6936'
     KEY_JANSSEN = '7978'
+    KEY_ASTRA = '7109'
     vaccine_motives = {
         KEY_PFIZER: 'Pfizer',
         KEY_MODERNA: 'Moderna',
         KEY_JANSSEN: 'Janssen',
+        KEY_ASTRA: 'AstraZeneca',
     }
     centers = URL(r'/impfung-covid-19-corona/(?P<where>\w+)', CentersPage)
     center = URL(r'/praxis/.*', CenterPage)
@@ -576,6 +588,7 @@ class Application:
                 return 1
         else:
             end_date = start_date + relativedelta(days=args.time_window)
+        log_ts("# Configuration")
         log('Starting to look for vaccine slots for %s %s between %s and %s...', docto.patient['first_name'], docto.patient['last_name'], start_date, end_date)
         log('Vaccines: %s', ', '.join(vaccine_list))
         log('Country: %s ', args.country)
@@ -584,27 +597,26 @@ class Application:
 
         while True:
             try:
+                log_ts('--------------------------------------\n#LOOP Going through the centers found')
                 for center in docto.find_centers(cities, motives):
                     if args.center:
                         if center['name_with_title'] not in args.center:
-                            logging.debug("Skipping center '%s'", center['name_with_title'])
+                            logging.debug("\nSkipping center '%s'", center['name_with_title'])
                             continue
-                    else:
-                        if docto.normalize(center['city']) not in cities:
-                            logging.debug("Skipping city '%(city)s' %(name_with_title)s", center)
-                            continue
-
-                    log('')
-                    log('Center %s:', center['name_with_title'])
+                    # Don't skip nearby cities
+                    #else:
+                    #    if docto.normalize(center['city']) not in cities:
+                    #        logging.debug("\nSkipping city '%(city)s' %(name_with_title)s", center)
+                    #        continue
+                    log('## Inspecting center %s in %s:', center['name_with_title'], center['city'])
 
                     if docto.try_to_book(center, vaccine_list, start_date, end_date, args.dry_run):
                         log('')
                         log('💉 %s Congratulations.' % colored('Booked!', 'green', attrs=('bold',)))
                         return 0
-
                     sleep(1)
-
-                sleep(5)
+                log("Sleep a bit...")
+                sleep(20 + randrange(10))
             except CityNotFound as e:
                 print('\n%s: City %s not found. Make sure you selected a city from the available countries.' % (colored('Error', 'red'), colored(e, 'yellow')))
                 return 1
@@ -626,3 +638,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print('Abort.')
         sys.exit(1)
+
